@@ -13,8 +13,8 @@ TIKTOK_STATUS_SERVICE_URL = "https://huginn.buzs.cloud/v1/status"
 # Cria a namespace e substitui os IDs antes do deploy.
 [[kv_namespaces]]
 binding = "LIVE_CACHE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+id = "ceafd899d9e5432cb1d75c73453491d6"
+preview_id = "58451c947d784f5c9f5fad76b17b4ae3"
 
 [triggers]
 crons = ["*/1 * * * *"]
