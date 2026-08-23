@@ -57,8 +57,8 @@ Quando existe um resultado anterior em KV e a consulta atual falha, o canal rece
 
 - Twitch: implementado com Helix `Get Streams` e Client Credentials.
 - YouTube: implementado com YouTube Data API usando o ID do canal, normalmente iniciado por `UC`.
-- TikTok: reconhecido, mas retorna `unsupported` ate existir uma API oficial/aprovada ou uma fonte externa decidida pelo projeto.
-- Kick: reconhecido para manter o contrato extensivel, mas ainda sem adaptador.
+- TikTok: integrado por um servico Node externo, usando `tiktok-live-connector`. A biblioteca nao e uma API oficial do TikTok.
+- Kick: implementado com a API publica v1 e OAuth client credentials.
 
 Novos provedores devem ser adicionados em `src/providers.ts`, sem aceitar URLs de API pela query string.
 
@@ -90,9 +90,20 @@ Secrets de producao:
 mise exec -- npm exec -- wrangler secret put TWITCH_CLIENT_ID
 mise exec -- npm exec -- wrangler secret put TWITCH_CLIENT_SECRET
 mise exec -- npm exec -- wrangler secret put YOUTUBE_API_KEY
+mise exec -- npm exec -- wrangler secret put KICK_CLIENT_ID
+mise exec -- npm exec -- wrangler secret put KICK_CLIENT_SECRET
+mise exec -- npm exec -- wrangler secret put TIKTOK_STATUS_SERVICE_TOKEN
 ```
 
+Defina `TIKTOK_STATUS_SERVICE_URL` em `[vars]` no `wrangler.toml` com a URL HTTPS publica do endpoint `/v1/status` do servico Node. O `TIKTOK_STATUS_SERVICE_TOKEN` deve ser igual nos dois servicos.
+
 O `ALLOWED_ORIGINS` deve conter a origem da pagina, separada por virgulas quando houver mais de uma. `CACHE_TTL_SECONDS` controla a validade do snapshot em KV e `DEFAULT_CHANNELS` define os canais atualizados pelo Cron Trigger.
+
+## Servico TikTok
+
+O servico Node deve existir e ser hospedado fora deste repositorio. O contrato que ele precisa implementar esta definido em `F:/Projects/buz/tiktok-status-service/AGENTS.md`.
+
+Ele deve expor `GET /v1/status?channel=<username>` sobre HTTPS, exigir um token compartilhado com o Worker e retornar `live`, `offline` ou `unavailable`. Antes de expor o servico, configure rate limit e HTTPS; o navegador nunca recebe esse token.
 
 ## Desenvolvimento e deploy
 
@@ -113,4 +124,4 @@ O endpoint `/health` nao consulta provedores. O endpoint `/` documenta as rotas 
 - Manter CORS restrito em `ALLOWED_ORIGINS` em producao.
 - Adicionar um binding `RATE_LIMITER` se o endpoint ficar publico em grande escala.
 - Monitorar quotas da Twitch e do YouTube antes de reduzir o TTL.
-- Nao usar scraping do TikTok sem decisao explicita sobre termos de uso, estabilidade e manutencao.
+- O conector TikTok e nao oficial e depende de protocolo interno; monitorar quebras, termos de uso e manutencao.

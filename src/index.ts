@@ -21,8 +21,9 @@ const cleanChannel = (provider: ProviderName, value: string): string | undefined
   const channel = value.trim().replace(/^@/, "");
   if (!channel || channel.length > MAX_CHANNEL_SPEC_LENGTH) return undefined;
   if (provider === "twitch") return /^[a-z0-9_]{1,25}$/i.test(channel) ? channel.toLowerCase() : undefined;
-  if (provider === "youtube") return /^(UC[a-zA-Z0-9_-]{20,})$/.test(channel) ? channel : undefined;
-  return /^[a-z0-9_.-]{1,64}$/i.test(channel) ? channel.toLowerCase() : undefined;
+  if (provider === "youtube") return /^UC[a-zA-Z0-9_-]{22}$/.test(channel) ? channel : undefined;
+  if (provider === "kick") return /^[a-z0-9_-]{1,25}$/i.test(channel) ? channel.toLowerCase() : undefined;
+  return /^[a-z0-9._]{1,24}$/i.test(channel) ? channel.toLowerCase() : undefined;
 };
 
 const parseSpec = (raw: string, defaultProvider?: string): ChannelRequest | undefined => {
@@ -41,7 +42,6 @@ const parseSpec = (raw: string, defaultProvider?: string): ChannelRequest | unde
 const parseSpecs = (values: string[], defaultProvider: string | undefined, limit: number): { channels?: ChannelRequest[]; error?: string } => {
   const rawValues = values.flatMap((value) => value.split(",").map((item) => item.trim()).filter(Boolean));
   if (rawValues.length === 0) return { error: "missing_channels" };
-  if (rawValues.length > limit) return { error: "too_many_channels" };
 
   const channels: ChannelRequest[] = [];
   const keys = new Set<string>();
@@ -49,13 +49,14 @@ const parseSpecs = (values: string[], defaultProvider: string | undefined, limit
     const channel = parseSpec(raw, defaultProvider);
     if (!channel) return { error: "invalid_channel_spec" };
     if (keys.has(channel.key)) continue;
+    if (channels.length >= limit) return { error: "too_many_channels" };
     keys.add(channel.key);
     channels.push(channel);
   }
   return channels.length > 0 ? { channels } : { error: "missing_channels" };
 };
 
-const allowedOrigins = (env: Env): string[] => (env.ALLOWED_ORIGINS ?? "*").split(",").map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = (env: Env): string[] => (env.ALLOWED_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
 
 const corsHeaders = (request: Request, env: Env): Headers => {
   const headers = new Headers({
@@ -100,50 +101,62 @@ const hashKey = async (value: string): Promise<string> => {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-const cacheKey = async (channels: ChannelRequest[]): Promise<string> => `live:v1:${await hashKey(channels.map((channel) => channel.key).join(","))}`;
+const cacheKey = async (channel: ChannelRequest): Promise<string> => `live:v1:${await hashKey(channel.key)}`;
 
 const readCached = async (env: Env, key: string): Promise<CachedEntry | undefined> => {
   if (!env.LIVE_CACHE) return undefined;
   try {
     const value = await env.LIVE_CACHE.get(key, "json");
-    if (!jsonObject(value) || !jsonObject(value.response) || typeof value.expiresAt !== "number") return undefined;
-    return value as unknown as CachedEntry;
+    if (!jsonObject(value) || !jsonObject(value.result) || typeof value.expiresAt !== "number") return undefined;
+    const result = value.result;
+    if (typeof result.id !== "string" || typeof result.provider !== "string" || typeof result.channel !== "string" || typeof result.status !== "string" || typeof result.checkedAt !== "string") {
+      return undefined;
+    }
+    return { result: result as unknown as LiveChannelResult, expiresAt: value.expiresAt };
   } catch {
     return undefined;
   }
 };
 
-const writeCached = async (env: Env, key: string, response: Omit<LiveResponse, "cache">): Promise<void> => {
+const writeCached = async (env: Env, key: string, result: LiveChannelResult): Promise<void> => {
   if (!env.LIVE_CACHE) return;
   try {
     const retention = Math.max(cacheTtl(env) * 10, 300);
-    await env.LIVE_CACHE.put(key, JSON.stringify({ response, expiresAt: Date.now() + cacheTtl(env) * 1_000 }), { expirationTtl: retention });
+    await env.LIVE_CACHE.put(key, JSON.stringify({ result, expiresAt: Date.now() + cacheTtl(env) * 1_000 }), { expirationTtl: retention });
   } catch {
     // A cache failure must not make the public status endpoint fail.
   }
 };
 
-const mergeStaleResults = (current: LiveChannelResult[], cached: CachedEntry | undefined): LiveChannelResult[] => {
-  if (!cached) return current;
-  const previous = new Map(cached.response.channels.map((channel) => [channel.id, channel]));
-  return current.map((channel) => {
-    const old = previous.get(channel.id);
-    if (!old || channel.status !== "unavailable" || (old.status !== "live" && old.status !== "offline")) return channel;
-    return {
-      ...channel,
-      stale: true,
-      lastKnown: { status: old.status, live: old.live === true, checkedAt: old.checkedAt },
-    };
-  });
+const readCachedChannels = async (channels: ChannelRequest[], env: Env): Promise<Map<string, CachedEntry | undefined>> => {
+  const entries = await Promise.all(
+    channels.map(async (channel) => [channel.key, await readCached(env, await cacheKey(channel))] as const),
+  );
+  return new Map(entries);
 };
 
-const fetchLiveResponse = async (channels: ChannelRequest[], env: Env, cached: CachedEntry | undefined): Promise<Omit<LiveResponse, "cache">> => {
+const mergeStaleResult = (current: LiveChannelResult, cached: CachedEntry | undefined): LiveChannelResult => {
+  if (!cached) return current;
+  const old = cached.result;
+  if (current.status !== "unavailable" || (old.status !== "live" && old.status !== "offline")) return current;
+  return {
+    ...current,
+    stale: true,
+    lastKnown: { status: old.status, live: old.live === true, checkedAt: old.checkedAt },
+  };
+};
+
+const fetchLiveResponse = async (channels: ChannelRequest[], env: Env, cached: Map<string, CachedEntry | undefined>): Promise<Omit<LiveResponse, "cache">> => {
   const requestedAt = new Date().toISOString();
-  const channelsResult = await Promise.all(channels.map((channel) => fetchProviderStatus(channel, env, requestedAt)));
-  const merged = mergeStaleResults(channelsResult, cached);
-  const hasProviderFailure = channelsResult.some((channel) => channel.status === "unavailable");
+  const merged = await Promise.all(channels.map(async (channel) => {
+    const previous = cached.get(channel.key);
+    if (previous && previous.expiresAt > Date.now()) return previous.result;
+
+    const current = await fetchProviderStatus(channel, env, requestedAt);
+    if (current.status !== "unavailable") await writeCached(env, await cacheKey(channel), current);
+    return mergeStaleResult(current, previous);
+  }));
   const response: Omit<LiveResponse, "cache"> = { service: SERVICE_NAME, requestedAt, channels: merged };
-  if (!hasProviderFailure) await writeCached(env, await cacheKey(channels), response);
   return response;
 };
 
@@ -168,22 +181,29 @@ const liveEndpoint = async (request: Request, env: Env): Promise<Response> => {
     });
   }
 
-  const key = await cacheKey(parsed.channels);
-  const cached = await readCached(env, key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return responseJson(request, env, 200, { ...cached.response, cache: "hit" }, "public, max-age=15, s-maxage=30, stale-if-error=120");
+  const cached = await readCachedChannels(parsed.channels, env);
+  const allFresh = parsed.channels.every((channel) => {
+    const entry = cached.get(channel.key);
+    return entry && entry.expiresAt > Date.now();
+  });
+  if (allFresh) {
+    return responseJson(request, env, 200, {
+      service: SERVICE_NAME,
+      requestedAt: new Date().toISOString(),
+      channels: parsed.channels.map((channel) => cached.get(channel.key)?.result).filter((channel): channel is LiveChannelResult => Boolean(channel)),
+      cache: "hit",
+    }, "private, no-store");
   }
 
   const response = await fetchLiveResponse(parsed.channels, env, cached);
   const isStale = response.channels.some((channel) => channel.stale);
-  return responseJson(request, env, 200, { ...response, cache: isStale ? "stale" : "miss" }, "public, max-age=15, s-maxage=30, stale-if-error=120");
+  return responseJson(request, env, 200, { ...response, cache: isStale ? "stale" : "miss" }, "private, no-store");
 };
 
 const refreshDefaults = async (env: Env): Promise<void> => {
   const parsed = defaultChannels(env);
   if (!parsed.channels) return;
-  const key = await cacheKey(parsed.channels);
-  const cached = await readCached(env, key);
+  const cached = await readCachedChannels(parsed.channels, env);
   await fetchLiveResponse(parsed.channels, env, cached);
 };
 

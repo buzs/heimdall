@@ -37,7 +37,7 @@ export type LiveResponse = {
 };
 
 export type CachedEntry = {
-  response: Omit<LiveResponse, "cache">;
+  result: LiveChannelResult;
   expiresAt: number;
 };
 
@@ -51,6 +51,10 @@ export interface Env {
   TWITCH_CLIENT_ID?: string;
   TWITCH_CLIENT_SECRET?: string;
   YOUTUBE_API_KEY?: string;
+  KICK_CLIENT_ID?: string;
+  KICK_CLIENT_SECRET?: string;
+  TIKTOK_STATUS_SERVICE_URL?: string;
+  TIKTOK_STATUS_SERVICE_TOKEN?: string;
   ALLOWED_ORIGINS?: string;
   CACHE_TTL_SECONDS?: string;
   DEFAULT_CHANNELS?: string;

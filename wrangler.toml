@@ -7,6 +7,8 @@ ALLOWED_ORIGINS = "https://links.buzs.dev"
 CACHE_TTL_SECONDS = "30"
 DEFAULT_CHANNELS = "twitch:buzs"
 MAX_CHANNELS = "12"
+# Fill this after deploying tiktok-service. Keep the token in Wrangler secrets.
+TIKTOK_STATUS_SERVICE_URL = ""
 
 # Cria a namespace e substitui os IDs antes do deploy.
 [[kv_namespaces]]
