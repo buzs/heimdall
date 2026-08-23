@@ -1,4 +1,4 @@
-name = "buzs-live-status"
+name = "heimdall"
 main = "src/index.ts"
 compatibility_date = "2026-08-21"
 
