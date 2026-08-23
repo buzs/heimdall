@@ -1,7 +1,7 @@
 import { fetchProviderStatus } from "./providers";
 import type { CachedEntry, ChannelRequest, Env, LiveChannelResult, LiveResponse, ProviderName } from "./types";
 
-const SERVICE_NAME = "buzs-live-status";
+const SERVICE_NAME = "heimdall";
 const DEFAULT_MAX_CHANNELS = 12;
 const MAX_CHANNEL_SPEC_LENGTH = 160;
 const SUPPORTED_PROVIDERS = new Set<ProviderName>(["twitch", "youtube", "tiktok", "kick"]);

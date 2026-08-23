@@ -1,4 +1,4 @@
-# Buzs Live Status
+# Heimdall
 
 Microservico Cloudflare Worker para consultar o estado de canais de live por query string. O site de links permanece estatico; este Worker concentra credenciais, chamadas aos provedores e cache.
 
@@ -23,7 +23,7 @@ Resposta de exemplo:
 
 ```json
 {
-  "service": "buzs-live-status",
+  "service": "heimdall",
   "requestedAt": "2026-08-23T18:30:00.000Z",
   "cache": "miss",
   "channels": [
@@ -101,7 +101,7 @@ O `ALLOWED_ORIGINS` deve conter a origem da pagina, separada por virgulas quando
 
 ## Servico TikTok
 
-O servico Node deve existir e ser hospedado fora deste repositorio. O contrato que ele precisa implementar esta definido em `F:/Projects/buz/tiktok-status-service/AGENTS.md`.
+O servico Node externo se chama Huginn e deve existir fora deste repositorio. O contrato dele esta definido no `AGENTS.md` do projeto Huginn.
 
 Ele deve expor `GET /v1/status?channel=<username>` sobre HTTPS, exigir um token compartilhado com o Worker e retornar `live`, `offline` ou `unavailable`. Antes de expor o servico, configure rate limit e HTTPS; o navegador nunca recebe esse token.
 

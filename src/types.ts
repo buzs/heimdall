@@ -30,7 +30,7 @@ export type LiveChannelResult = {
 };
 
 export type LiveResponse = {
-  service: "buzs-live-status";
+  service: "heimdall";
   requestedAt: string;
   cache: "hit" | "miss" | "stale";
   channels: LiveChannelResult[];
