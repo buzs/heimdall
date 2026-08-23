@@ -1,0 +1,18 @@
+name = "buzs-live-status"
+main = "src/index.ts"
+compatibility_date = "2026-08-21"
+
+[vars]
+ALLOWED_ORIGINS = "https://links.buzs.dev"
+CACHE_TTL_SECONDS = "30"
+DEFAULT_CHANNELS = "twitch:buzs"
+MAX_CHANNELS = "12"
+
+# Cria a namespace e substitui os IDs antes do deploy.
+[[kv_namespaces]]
+binding = "LIVE_CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+
+[triggers]
+crons = ["*/1 * * * *"]
