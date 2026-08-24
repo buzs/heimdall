@@ -58,9 +58,9 @@ Um novo adaptador deve manter o mesmo contrato, timeout de 8 segundos, sanitizac
 
 ## Cache e operacao
 
-- `LIVE_CACHE` guarda snapshots por combinacao normalizada de provedor e canal.
-- `CACHE_TTL_SECONDS` controla a validade, com limite de seguranca no codigo.
-- Cron Trigger atualiza `DEFAULT_CHANNELS` a cada minuto.
+- `LIVE_CACHE` guarda por sete dias o ultimo snapshot por combinacao normalizada de provedor e canal.
+- `CACHE_TTL_SECONDS` controla a validade do resultado recente na Cache API, com limite de seguranca no codigo.
+- Cron Trigger verifica `DEFAULT_CHANNELS` a cada minuto. O KV so e regravado quando o resultado muda semanticamente; `checkedAt` e `viewers` nao contam como mudanca.
 - Consultas arbitrarias continuam funcionando sob demanda.
 - `RATE_LIMITER` e opcional, mas recomendado para endpoint publico.
 - CORS deve ficar restrito em `ALLOWED_ORIGINS` em producao.

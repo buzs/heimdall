@@ -36,9 +36,8 @@ export type LiveResponse = {
   channels: LiveChannelResult[];
 };
 
-export type CachedEntry = {
+export type CachedSnapshot = {
   result: LiveChannelResult;
-  expiresAt: number;
 };
 
 export interface RateLimiter {

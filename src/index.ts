@@ -1,9 +1,10 @@
 import { fetchProviderStatus } from "./providers";
-import type { CachedEntry, ChannelRequest, Env, LiveChannelResult, LiveResponse, ProviderName } from "./types";
+import type { CachedSnapshot, ChannelRequest, Env, LiveChannelResult, ProviderName } from "./types";
 
 const SERVICE_NAME = "heimdall";
 const DEFAULT_MAX_CHANNELS = 12;
 const MAX_CHANNEL_SPEC_LENGTH = 160;
+const SNAPSHOT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
 const SUPPORTED_PROVIDERS = new Set<ProviderName>(["twitch", "youtube", "tiktok", "kick"]);
 
 const jsonObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -101,43 +102,103 @@ const hashKey = async (value: string): Promise<string> => {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-const cacheKey = async (channel: ChannelRequest): Promise<string> => `live:v1:${await hashKey(channel.key)}`;
+const storageKey = async (channel: ChannelRequest): Promise<string> => `live:v1:${await hashKey(channel.key)}`;
 
-const readCached = async (env: Env, key: string): Promise<CachedEntry | undefined> => {
+const parseStoredResult = (value: unknown, channel: ChannelRequest): LiveChannelResult | undefined => {
+  if (!jsonObject(value)) return undefined;
+  const validStatus = value.status === "live" || value.status === "offline" || value.status === "unavailable" || value.status === "unsupported";
+  const validLive = typeof value.live === "boolean" || value.live === null;
+  if (
+    value.id !== channel.key
+    || value.provider !== channel.provider
+    || value.channel !== channel.channel
+    || typeof value.url !== "string"
+    || !validStatus
+    || !validLive
+    || typeof value.checkedAt !== "string"
+  ) return undefined;
+  return value as unknown as LiveChannelResult;
+};
+
+const readSnapshot = async (env: Env, key: string, channel: ChannelRequest): Promise<CachedSnapshot | undefined> => {
   if (!env.LIVE_CACHE) return undefined;
   try {
     const value = await env.LIVE_CACHE.get(key, "json");
-    if (!jsonObject(value) || !jsonObject(value.result) || typeof value.expiresAt !== "number") return undefined;
-    const result = value.result;
-    if (typeof result.id !== "string" || typeof result.provider !== "string" || typeof result.channel !== "string" || typeof result.status !== "string" || typeof result.checkedAt !== "string") {
-      return undefined;
-    }
-    return { result: result as unknown as LiveChannelResult, expiresAt: value.expiresAt };
+    if (!jsonObject(value)) return undefined;
+    const result = parseStoredResult(value.result, channel);
+    return result ? { result } : undefined;
   } catch {
     return undefined;
   }
 };
 
-const writeCached = async (env: Env, key: string, result: LiveChannelResult): Promise<void> => {
+const writeSnapshot = async (env: Env, key: string, result: LiveChannelResult): Promise<void> => {
   if (!env.LIVE_CACHE) return;
   try {
-    const retention = Math.max(cacheTtl(env) * 10, 300);
-    await env.LIVE_CACHE.put(key, JSON.stringify({ result, expiresAt: Date.now() + cacheTtl(env) * 1_000 }), { expirationTtl: retention });
+    await env.LIVE_CACHE.put(key, JSON.stringify({ result }), { expirationTtl: SNAPSHOT_RETENTION_SECONDS });
   } catch {
-    // A cache failure must not make the public status endpoint fail.
+    // Persistent fallback failure must not make the public endpoint fail.
   }
 };
 
-const readCachedChannels = async (channels: ChannelRequest[], env: Env): Promise<Map<string, CachedEntry | undefined>> => {
+const readSnapshots = async (channels: ChannelRequest[], env: Env): Promise<Map<string, CachedSnapshot | undefined>> => {
   const entries = await Promise.all(
-    channels.map(async (channel) => [channel.key, await readCached(env, await cacheKey(channel))] as const),
+    channels.map(async (channel) => [channel.key, await readSnapshot(env, await storageKey(channel), channel)] as const),
   );
   return new Map(entries);
 };
 
-const mergeStaleResult = (current: LiveChannelResult, cached: CachedEntry | undefined): LiveChannelResult => {
-  if (!cached) return current;
-  const old = cached.result;
+const edgeCacheRequest = async (request: Request, channel: ChannelRequest): Promise<Request> => {
+  const url = new URL(request.url);
+  url.pathname = `/__heimdall_cache/live/${await hashKey(channel.key)}`;
+  url.search = "";
+  url.hash = "";
+  return new Request(url.toString(), { method: "GET" });
+};
+
+const readEdgeCached = async (request: Request, channel: ChannelRequest): Promise<LiveChannelResult | undefined> => {
+  try {
+    const response = await caches.default.match(await edgeCacheRequest(request, channel));
+    return response ? parseStoredResult(await response.json(), channel) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const writeEdgeCached = async (request: Request, channel: ChannelRequest, result: LiveChannelResult, env: Env): Promise<void> => {
+  try {
+    const response = new Response(JSON.stringify(result), {
+      headers: {
+        "cache-control": `public, s-maxage=${cacheTtl(env)}`,
+        "content-type": "application/json; charset=utf-8",
+      },
+    });
+    await caches.default.put(await edgeCacheRequest(request, channel), response);
+  } catch {
+    // Edge cache support depends on the deployment route and must remain optional.
+  }
+};
+
+const readEdgeCachedChannels = async (request: Request, channels: ChannelRequest[]): Promise<Map<string, LiveChannelResult | undefined>> => {
+  const entries = await Promise.all(channels.map(async (channel) => [channel.key, await readEdgeCached(request, channel)] as const));
+  return new Map(entries);
+};
+
+const snapshotChanged = (current: LiveChannelResult, snapshot: CachedSnapshot | undefined): boolean => {
+  if (current.status !== "live" && current.status !== "offline") return false;
+  const old = snapshot?.result;
+  return !old
+    || old.status !== current.status
+    || old.live !== current.live
+    || old.url !== current.url
+    || old.title !== current.title
+    || old.category !== current.category
+    || old.startedAt !== current.startedAt;
+};
+
+const mergeStaleResult = (current: LiveChannelResult, snapshot: CachedSnapshot | undefined): LiveChannelResult => {
+  if (!snapshot) return current;
+  const old = snapshot.result;
   if (current.status !== "unavailable" || (old.status !== "live" && old.status !== "offline")) return current;
   return {
     ...current,
@@ -146,18 +207,28 @@ const mergeStaleResult = (current: LiveChannelResult, cached: CachedEntry | unde
   };
 };
 
-const fetchLiveResponse = async (channels: ChannelRequest[], env: Env, cached: Map<string, CachedEntry | undefined>): Promise<Omit<LiveResponse, "cache">> => {
+const refreshChannels = async (
+  channels: ChannelRequest[],
+  env: Env,
+  snapshots: Map<string, CachedSnapshot | undefined>,
+  request?: Request,
+  context?: ExecutionContext,
+): Promise<{ requestedAt: string; channels: LiveChannelResult[] }> => {
   const requestedAt = new Date().toISOString();
-  const merged = await Promise.all(channels.map(async (channel) => {
-    const previous = cached.get(channel.key);
-    if (previous && previous.expiresAt > Date.now()) return previous.result;
-
+  const updates: Promise<void>[] = [];
+  const results = await Promise.all(channels.map(async (channel) => {
+    const snapshot = snapshots.get(channel.key);
     const current = await fetchProviderStatus(channel, env, requestedAt);
-    if (current.status !== "unavailable") await writeCached(env, await cacheKey(channel), current);
-    return mergeStaleResult(current, previous);
+    if (snapshotChanged(current, snapshot)) updates.push(writeSnapshot(env, await storageKey(channel), current));
+    const result = mergeStaleResult(current, snapshot);
+    if (request) updates.push(writeEdgeCached(request, channel, result, env));
+    return result;
   }));
-  const response: Omit<LiveResponse, "cache"> = { service: SERVICE_NAME, requestedAt, channels: merged };
-  return response;
+
+  const updatePromise = Promise.all(updates).then(() => undefined);
+  if (context) context.waitUntil(updatePromise);
+  else await updatePromise;
+  return { requestedAt, channels: results };
 };
 
 const defaultChannels = (env: Env): { channels?: ChannelRequest[]; error?: string } => {
@@ -171,7 +242,7 @@ const requestChannels = (url: URL, env: Env): { channels?: ChannelRequest[]; err
   return parseSpecs(values, url.searchParams.get("provider") ?? undefined, maxChannels(env));
 };
 
-const liveEndpoint = async (request: Request, env: Env): Promise<Response> => {
+const liveEndpoint = async (request: Request, env: Env, context: ExecutionContext): Promise<Response> => {
   const url = new URL(request.url);
   const parsed = requestChannels(url, env);
   if (!parsed.channels) {
@@ -181,33 +252,40 @@ const liveEndpoint = async (request: Request, env: Env): Promise<Response> => {
     });
   }
 
-  const cached = await readCachedChannels(parsed.channels, env);
-  const allFresh = parsed.channels.every((channel) => {
-    const entry = cached.get(channel.key);
-    return entry && entry.expiresAt > Date.now();
-  });
-  if (allFresh) {
+  const edgeCached = await readEdgeCachedChannels(request, parsed.channels);
+  const missing = parsed.channels.filter((channel) => !edgeCached.get(channel.key));
+  if (missing.length === 0) {
+    const channels = parsed.channels.map((channel) => edgeCached.get(channel.key)).filter((channel): channel is LiveChannelResult => Boolean(channel));
+    const isStale = channels.some((channel) => channel.stale);
     return responseJson(request, env, 200, {
       service: SERVICE_NAME,
       requestedAt: new Date().toISOString(),
-      channels: parsed.channels.map((channel) => cached.get(channel.key)?.result).filter((channel): channel is LiveChannelResult => Boolean(channel)),
-      cache: "hit",
+      channels,
+      cache: isStale ? "stale" : "hit",
     }, "private, no-store");
   }
 
-  const response = await fetchLiveResponse(parsed.channels, env, cached);
-  const isStale = response.channels.some((channel) => channel.stale);
-  return responseJson(request, env, 200, { ...response, cache: isStale ? "stale" : "miss" }, "private, no-store");
+  const snapshots = await readSnapshots(missing, env);
+  const refreshed = await refreshChannels(missing, env, snapshots, request, context);
+  const refreshedByKey = new Map(missing.map((channel, index) => [channel.key, refreshed.channels[index]]));
+  const channels = parsed.channels.map((channel) => edgeCached.get(channel.key) ?? refreshedByKey.get(channel.key)).filter((channel): channel is LiveChannelResult => Boolean(channel));
+  const isStale = channels.some((channel) => channel.stale);
+  return responseJson(request, env, 200, {
+    service: SERVICE_NAME,
+    requestedAt: refreshed.requestedAt,
+    channels,
+    cache: isStale ? "stale" : "miss",
+  }, "private, no-store");
 };
 
 const refreshDefaults = async (env: Env): Promise<void> => {
   const parsed = defaultChannels(env);
   if (!parsed.channels) return;
-  const cached = await readCachedChannels(parsed.channels, env);
-  await fetchLiveResponse(parsed.channels, env, cached);
+  const snapshots = await readSnapshots(parsed.channels, env);
+  await refreshChannels(parsed.channels, env, snapshots);
 };
 
-const handleRequest = async (request: Request, env: Env): Promise<Response> => {
+const handleRequest = async (request: Request, env: Env, context: ExecutionContext): Promise<Response> => {
   if (!isAllowedOrigin(request, env)) return responseJson(request, env, 403, { error: "origin_not_allowed" });
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
   if (request.method !== "GET" && request.method !== "HEAD") return responseJson(request, env, 405, { error: "method_not_allowed" });
@@ -225,12 +303,12 @@ const handleRequest = async (request: Request, env: Env): Promise<Response> => {
   }
   if (url.pathname !== "/v1/live") return responseJson(request, env, 404, { error: "not_found" });
   if (!(await enforceRateLimit(request, env, "live"))) return responseJson(request, env, 429, { error: "rate_limited" });
-  return liveEndpoint(request, env);
+  return liveEndpoint(request, env, context);
 };
 
 export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return handleRequest(request, env);
+  fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
+    return handleRequest(request, env, context);
   },
   scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext): void {
     context.waitUntil(refreshDefaults(env));

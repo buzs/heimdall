@@ -97,7 +97,7 @@ mise exec -- npm exec -- wrangler secret put TIKTOK_STATUS_SERVICE_TOKEN
 
 Defina `TIKTOK_STATUS_SERVICE_URL` em `[vars]` no `wrangler.toml` com a URL HTTPS publica do endpoint `/v1/status` do servico Node. O `TIKTOK_STATUS_SERVICE_TOKEN` deve ser igual nos dois servicos.
 
-O `ALLOWED_ORIGINS` deve conter a origem da pagina, separada por virgulas quando houver mais de uma. `CACHE_TTL_SECONDS` controla a validade do snapshot em KV e `DEFAULT_CHANNELS` define os canais atualizados pelo Cron Trigger.
+O `ALLOWED_ORIGINS` deve conter a origem da pagina, separada por virgulas quando houver mais de uma. `CACHE_TTL_SECONDS` controla a validade do resultado recente na Cache API e `DEFAULT_CHANNELS` define os canais atualizados pelo Cron Trigger.
 
 ## Servico TikTok
 
@@ -113,7 +113,11 @@ mise exec -- npm run dev
 mise exec -- npm run deploy
 ```
 
-O Cron Trigger atualiza `DEFAULT_CHANNELS` uma vez por minuto. Consultas com outros canais continuam funcionando sob demanda e usam a mesma cache por combinacao normalizada de provedor e canal.
+O Cron Trigger verifica `DEFAULT_CHANNELS` uma vez por minuto. Consultas com outros canais continuam funcionando sob demanda e usam a mesma cache por combinacao normalizada de provedor e canal.
+
+A Cache API guarda resultados recentes por 30 segundos no data center que atendeu a requisicao. O KV mantem o ultimo snapshot por sete dias para fallback e so e regravado quando mudam estado, transmissao, URL, titulo ou categoria. `checkedAt` e `viewers` nao provocam escritas persistentes.
+
+Com um canal padrao, o Cron consome cerca de 1.440 leituras de KV por dia, abaixo da franquia gratuita de 100.000. Escritas normalmente acontecem apenas na primeira verificacao e em mudancas semanticas; cada canal novo consultado tambem pode criar seu primeiro snapshot.
 
 O endpoint `/health` nao consulta provedores. O endpoint `/` documenta as rotas e os provedores sem expor secrets.
 
