@@ -1,0 +1,21 @@
+[tools]
+node = "22.23.2"
+
+[tasks.install]
+description = "Install locked dependencies"
+run = "npm ci"
+
+[tasks.dev]
+description = "Run the Worker locally with Wrangler"
+run = "npm run dev"
+
+[tasks.typecheck]
+run = "npm run typecheck"
+
+[tasks.build]
+description = "Validate the Worker bundle without deploying"
+run = "npm exec -- wrangler deploy --dry-run"
+
+[tasks.check]
+description = "Typecheck and validate the Worker bundle"
+depends = ["typecheck", "build"]

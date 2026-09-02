@@ -67,7 +67,9 @@ Novos provedores devem ser adicionados em `src/providers.ts`, sem aceitar URLs d
 Instale as dependencias usando `mise`:
 
 ```bash
-mise exec -- npm install
+mise trust
+mise install
+mise run install
 ```
 
 Crie uma namespace KV e substitua os IDs em `wrangler.toml`:
@@ -108,10 +110,13 @@ Ele deve expor `GET /v1/status?channel=<username>` sobre HTTPS, exigir um token 
 ## Desenvolvimento e deploy
 
 ```bash
-mise exec -- npm run typecheck
-mise exec -- npm run dev
+mise run check
+mise run dev
 mise exec -- npm run deploy
 ```
+
+`mise run check` executa typecheck e valida o bundle com `wrangler deploy
+--dry-run`. Node esta fixado em `mise.toml`.
 
 O Cron Trigger verifica `DEFAULT_CHANNELS` uma vez por minuto. Consultas com outros canais continuam funcionando sob demanda e usam a mesma cache por combinacao normalizada de provedor e canal.
 

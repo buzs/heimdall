@@ -1,6 +1,6 @@
 # Instrucoes para agentes
 
-Este projeto e um microservico Cloudflare Worker independente do site `F:/Projects/buz/links`. Leia este arquivo antes de alterar o Worker.
+Este projeto e um microservico Cloudflare Worker independente do site publico de links. Leia este arquivo antes de alterar o Worker.
 
 ## Objetivo
 
@@ -8,14 +8,18 @@ Consultar status de canais de live por query string, mantendo credenciais e cham
 
 ## Execucao
 
-Use sempre `mise` para Node/npm:
+Node esta fixado em `mise.toml`. Use sempre `mise`:
 
 ```bash
-mise exec -- npm install
-mise exec -- npm run typecheck
-mise exec -- npm run dev
-mise exec -- npm run deploy
+mise trust
+mise install
+mise run install
+mise run check
+mise run dev
 ```
+
+`mise run check` executa typecheck e valida o bundle do Worker. Deploy continua
+explicito com `mise exec -- npm run deploy`.
 
 O build/verificacao principal e `mise exec -- npm run typecheck`. `wrangler deploy --dry-run` pode ser usado para validar o bundle:
 
@@ -51,7 +55,11 @@ O contrato de canal usa `status` (`live`, `offline`, `unavailable`, `unsupported
 
 - Twitch usa Helix `Get Streams` com Client Credentials.
 - YouTube usa YouTube Data API com ID de canal `UC...`.
-- TikTok e Kick sao reconhecidos, mas retornam `unsupported` ate existir uma API oficial/aprovada.
+- Kick usa a API publica v1 com OAuth client credentials.
+- TikTok e resolvido pelo Huginn, chamando `GET /v1/status` em
+  `TIKTOK_STATUS_SERVICE_URL` com o token compartilhado. O Heimdall nunca fala
+  com o TikTok diretamente e nunca importa um conector nao oficial.
+- `unsupported` fica reservado para um provedor sem adaptador.
 - Hosts de API ficam fixos em `src/providers.ts`.
 
 Um novo adaptador deve manter o mesmo contrato, timeout de 8 segundos, sanitizacao de resposta e erro sem detalhes de credenciais. Nao fazer scraping de TikTok sem decisao explicita sobre termos de uso e manutencao.
@@ -65,7 +73,11 @@ Um novo adaptador deve manter o mesmo contrato, timeout de 8 segundos, sanitizac
 - `RATE_LIMITER` e opcional, mas recomendado para endpoint publico.
 - CORS deve ficar restrito em `ALLOWED_ORIGINS` em producao.
 
-Secrets permitidos: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` e `YOUTUBE_API_KEY`. Configure-os somente com `wrangler secret put`; nunca os coloque em `wrangler.toml`, `src/`, README ou frontend.
+Secrets permitidos: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `YOUTUBE_API_KEY`,
+`KICK_CLIENT_ID`, `KICK_CLIENT_SECRET` e `TIKTOK_STATUS_SERVICE_TOKEN`.
+Configure-os somente com `wrangler secret put`; nunca os coloque em
+`wrangler.toml`, `src/`, README ou frontend. O `TIKTOK_STATUS_SERVICE_TOKEN`
+precisa ser identico ao token configurado no Huginn e nunca chega ao navegador.
 
 Antes de publicar, crie a namespace KV e substitua os IDs placeholder de `wrangler.toml`. O projeto nao deve depender do `wrangler.toml` do Pages.
 
@@ -75,6 +87,5 @@ Antes de publicar, crie a namespace KV e substitua os IDs placeholder de `wrangl
 2. Verificar o estado do diretorio e nao reverter alteracoes de outros usuarios.
 3. Manter providers sem SSRF e sem segredos no cliente.
 4. Usar `apply_patch` para edicoes manuais.
-5. Rodar `mise exec -- npm run typecheck`.
-6. Rodar `mise exec -- npm exec -- wrangler deploy --dry-run` quando alterar Worker ou `wrangler.toml`.
-7. Informar no resumo os comandos executados e qualquer API/provedor ainda pendente.
+5. Rodar `mise run check`, que cobre typecheck e o dry-run do bundle.
+6. Informar no resumo os comandos executados e qualquer API/provedor ainda pendente.
