@@ -66,7 +66,7 @@ Novos provedores devem ser adicionados em `src/providers.ts`, sem aceitar URLs d
 
 Instale as dependencias usando `mise`:
 
-```bash
+```powershell
 mise trust
 mise install
 mise run install
@@ -74,21 +74,21 @@ mise run install
 
 Crie uma namespace KV e substitua os IDs em `wrangler.toml`:
 
-```bash
+```powershell
 mise exec -- npm exec -- wrangler kv namespace create LIVE_CACHE
 mise exec -- npm exec -- wrangler kv namespace create LIVE_CACHE --preview
 ```
 
 Para desenvolvimento local, copie `.dev.vars.example` para `.dev.vars` e preencha somente credenciais de teste:
 
-```bash
-copy .dev.vars.example .dev.vars
-mise exec -- npm run dev
+```powershell
+Copy-Item .dev.vars.example .dev.vars
+mise run dev
 ```
 
 Secrets de producao:
 
-```bash
+```powershell
 mise exec -- npm exec -- wrangler secret put TWITCH_CLIENT_ID
 mise exec -- npm exec -- wrangler secret put TWITCH_CLIENT_SECRET
 mise exec -- npm exec -- wrangler secret put YOUTUBE_API_KEY
@@ -109,7 +109,7 @@ Ele deve expor `GET /v1/status?channel=<username>` sobre HTTPS, exigir um token 
 
 ## Desenvolvimento e deploy
 
-```bash
+```powershell
 mise run check
 mise run dev
 mise exec -- npm run deploy

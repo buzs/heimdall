@@ -10,7 +10,7 @@ Consultar status de canais de live por query string, mantendo credenciais e cham
 
 Node esta fixado em `mise.toml`. Use sempre `mise`:
 
-```bash
+```powershell
 mise trust
 mise install
 mise run install
@@ -23,7 +23,7 @@ explicito com `mise exec -- npm run deploy`.
 
 O build/verificacao principal e `mise exec -- npm run typecheck`. `wrangler deploy --dry-run` pode ser usado para validar o bundle:
 
-```bash
+```powershell
 mise exec -- npm exec -- wrangler deploy --dry-run
 ```
 
